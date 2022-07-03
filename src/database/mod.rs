@@ -1,2 +1,2 @@
 pub mod models;
-pub mod db_manger;
+pub mod db_manager;
