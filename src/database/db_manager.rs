@@ -4,7 +4,7 @@ use super::models::{
     channel::Channel,
     channel_video::ChannelVideo,
     user::DBUser,
-    username_uuid::{self, UsernameUuid},
+    username_uuid::UsernameUuid,
     video::Video, user_subscription::UserSubscribed,
 };
 use scylla::{
@@ -14,8 +14,7 @@ use scylla::{
     transport::{
         errors::{NewSessionError, QueryError},
         query_result::FirstRowError,
-    },
-    IntoTypedRows, Session, SessionBuilder,
+    }, Session, SessionBuilder,
 };
 use tracing::Level;
 
