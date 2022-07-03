@@ -412,8 +412,7 @@ impl DbManager {
     }
     /// Gets the subscriptions for all users in the database
     pub async fn get_subs(
-        &self,
-        users: &mut Vec<String>,
+        &self
     ) -> Result<HashMap<String, Vec<String>>, DbError> {
         let mut map: HashMap<String, Vec<String>> = HashMap::new();
         let mut subvec: Vec<UserSubscribed> = Vec::new();
