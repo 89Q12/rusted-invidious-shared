@@ -1,6 +1,23 @@
-use scylla::{Session, prepared_statement::PreparedStatement, SessionBuilder, transport::{errors::{NewSessionError, QueryError}, query_result::FirstRowError}, IntoTypedRows, cql_to_rust::FromRowError, frame::value::Timestamp};
+use std::collections::HashMap;
+
+use super::models::{
+    channel::Channel,
+    channel_video::ChannelVideo,
+    user::DBUser,
+    username_uuid::{self, UsernameUuid},
+    video::Video, user_subscription::UserSubscribed,
+};
+use scylla::{
+    cql_to_rust::FromRowError,
+    frame::value::Timestamp,
+    prepared_statement::PreparedStatement,
+    transport::{
+        errors::{NewSessionError, QueryError},
+        query_result::FirstRowError,
+    },
+    IntoTypedRows, Session, SessionBuilder,
+};
 use tracing::Level;
-use super::models::{video::Video, channel_video::ChannelVideo, channel::Channel, user::DBUser, username_uuid::{self, UsernameUuid}};
 
 #[derive(Debug)]
 pub enum DbError {
@@ -15,24 +32,27 @@ pub struct DbManager {
 
 impl DbManager {
     /// Initializes a new DbManager struct and creates the database session
-    pub async fn new(uri: &str, known_hosts: Option<Vec<String>>) -> Result<Self, NewSessionError>{
+    pub async fn new(uri: &str, known_hosts: Option<Vec<String>>) -> Result<Self, NewSessionError> {
         let session_builder;
-        if known_hosts.is_some(){
-            session_builder = SessionBuilder::new().known_node(uri).known_nodes(&known_hosts.unwrap());
-        }else{
+        if known_hosts.is_some() {
+            session_builder = SessionBuilder::new()
+                .known_node(uri)
+                .known_nodes(&known_hosts.unwrap());
+        } else {
             session_builder = SessionBuilder::new().known_node(uri);
         }
- 
+
         match session_builder.build().await {
-            Ok(session) => {
-                Ok(Self { session, prepared_statements: Vec::new() })
-            },
+            Ok(session) => Ok(Self {
+                session,
+                prepared_statements: Vec::new(),
+            }),
             Err(err) => Err(err),
         }
     }
 
-    pub async fn use_keyspace(&self){
-        match self.session.use_keyspace("rusted_invidious", false).await{
+    pub async fn use_keyspace(&self) {
+        match self.session.use_keyspace("rusted_invidious", false).await {
             Ok(_) => tracing::event!(target:"db", Level::DEBUG, "Successfully set keyspace"),
             Err(_) => panic!("KESPACE NOT FOUND EXISTING...."),
         }
@@ -41,32 +61,70 @@ impl DbManager {
     /// Prepared statements are stored in in a vec and the indices are statically maped to specific statements
     /// Not fancy but fast
     /// E.g. index 0 will be the statement to get a video by id from the database
-    /// 0 =get_video 1= get_user 2 = get_user_uid 3 = get_channel_video 4 = get_channel 5 = get_session 
+    /// 0 =get_video 1= get_user 2 = get_user_uid 3 = get_channel_video 4 = get_channel 5 = get_session
     /// 6= insert_video 7 insert_user 8 = insert_user_uid, 9 = insert_channel_video 10 = insert_channel 11 = insert_session 12 = insert_subscription 13 = insert_watched
-    pub async fn init_prepared_statements(&mut self){
-        let get_video = self.session.prepare("SELECT * FROM videos WHERE video_id = ?");
-        let get_user = self.session.prepare("SELECT * FROM users WHERE uid = ? and name = ?");
-        let get_user_uid = self.session.prepare("SELECT uid FROM username_uuid WHERE name = ?");
-        let get_channel_video = self.session.prepare("SELECT * FROM channel_videos WHERE video_id = ? and channel_id = ? and updated_at < ?");
-        let get_channel = self.session.prepare("SELECT * FROM channels WHERE channel_id = ?");
-        let get_session = self.session.prepare("SELECT issued FROM sessions WHERE uid = ? and session_id = ?");
-        
+    pub async fn init_prepared_statements(&mut self) {
+        let get_video = self
+            .session
+            .prepare("SELECT * FROM videos WHERE video_id = ?");
+        let get_user = self
+            .session
+            .prepare("SELECT * FROM users WHERE uid = ? and name = ?");
+        let get_user_uid = self
+            .session
+            .prepare("SELECT uid FROM username_uuid WHERE name = ?");
+        let get_channel_video = self.session.prepare(
+            "SELECT * FROM channel_videos WHERE video_id = ? and channel_id = ? and updated_at < ?",
+        );
+        let get_channel = self
+            .session
+            .prepare("SELECT * FROM channels WHERE channel_id = ?");
+        let get_session = self
+            .session
+            .prepare("SELECT issued FROM sessions WHERE uid = ? and session_id = ?");
+
         let insert_video = self.session.prepare("INSERT INTO videos (video_id, updated_at, channel_id, title, likes, view_count,\
              description, length_in_seconds, genere, genre_url, license, author_verified, subcriber_count, author_name, author_thumbnail_url, is_famliy_safe, publish_date, formats, storyboard_spec_url, continuation_related, continuation_comments ) \
         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
         let insert_user = self.session.prepare("INSERT INTO users (uid, name, created_at, password, access_token, feed_needs_update) VALUES(?,?,?,?,?,?)");
-        let insert_user_uid = self.session.prepare("INSERT INTO username_uuid (name, uid) VALUES (?,?)");
+        let insert_user_uid = self
+            .session
+            .prepare("INSERT INTO username_uuid (name, uid) VALUES (?,?)");
         let insert_channel_video = self.session.prepare("INSERT INTO channel_videos (video_id, updated_at, channel_id, title, likes, view_count,\
             description, length_in_seconds, genere, genre_url, license, author_verified, subcriber_count, author_name, author_thumbnail_url, is_famliy_safe, publish_date, formats, storyboard_spec_url, live, premiere_timestamp ) \
        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
         let insert_channel = self.session.prepare("INSERT INTO channels (channel_id, updated_at, subscribed_at, author_name) VALUES (?,?,?,?)");
-        let insert_session = self.session.prepare("INSERT INTO sessions (uid, session_id, issued) VALUES(?,?,?)");
-        let insert_subscription = self.session.prepare("INSERT INTO user_subscriptions (uid, channel_id) VALUES(?,?)");
-        let insert_watched = self.session.prepare("INSERT INTO user_watched (uid, video_id) VALUES(?,?)");
+        let insert_session = self
+            .session
+            .prepare("INSERT INTO sessions (uid, session_id, issued) VALUES(?,?,?)");
+        let insert_subscription = self
+            .session
+            .prepare("INSERT INTO user_subscriptions (uid, channel_id) VALUES(?,?)");
+        let insert_watched = self
+            .session
+            .prepare("INSERT INTO user_watched (uid, video_id) VALUES(?,?)");
         let get_users = self.session.prepare("SELECT * FROM users");
-        let get_subs = self.session.prepare("SELECT channel_id FROM user_subscriptions");
-        let results = tokio::join!(get_video, get_user, get_user_uid, get_channel_video, get_channel,get_session, 
-            insert_video,insert_user,insert_user_uid, insert_channel_video, insert_channel, insert_session, insert_subscription, insert_watched, get_users,get_subs);
+        let get_subs = self
+            .session
+            .prepare("SELECT channel_id FROM user_subscriptions");
+        let results = tokio::join!(
+            get_video,
+            get_user,
+            get_user_uid,
+            get_channel_video,
+            get_channel,
+            get_session,
+            insert_video,
+            insert_user,
+            insert_user_uid,
+            insert_channel_video,
+            insert_channel,
+            insert_session,
+            insert_subscription,
+            insert_watched,
+            get_users,
+            get_subs
+        );
 
         self.prepared_statements.push(results.0.unwrap());
         self.prepared_statements.push(results.1.unwrap());
@@ -84,19 +142,19 @@ impl DbManager {
         self.prepared_statements.push(results.13.unwrap());
         self.prepared_statements.push(results.14.unwrap());
         self.prepared_statements.push(results.15.unwrap());
-
     }
     /// Checks if the database exists if not it creates a new keyspace and creates all tables.
     /// With the assumption that the database is a single node cluster.
     /// Should only be called once and before the web server starts
-    pub async fn init_database(&self) -> Result<(), QueryError>{
-        let keyspace = self.session
-        .query(
-            "CREATE KEYSPACE IF NOT EXISTS rusted_invidious WITH REPLICATION = \
+    pub async fn init_database(&self) -> Result<(), QueryError> {
+        let keyspace = self
+            .session
+            .query(
+                "CREATE KEYSPACE IF NOT EXISTS rusted_invidious WITH REPLICATION = \
             {'class' : 'SimpleStrategy', 'replication_factor' : 1};",
-            &[],
-        )
-        .await;
+                &[],
+            )
+            .await;
         // Matches the keyspace query, if it fails then the db is already created and the fn returns
         match keyspace {
             Ok(_) => tracing::event!(target:"db", Level::DEBUG, "Successfully created keyspace"),
@@ -165,15 +223,14 @@ impl DbManager {
             &[],
         )
         .await?;
-        
+
         Ok(())
     }
-    pub async fn drop_database(&self)-> Result<(), QueryError>{
-        let result = self.session
-        .query(
-            "DROP KEYSPACE rusted_invidious",&[]
-        )
-        .await;
+    pub async fn drop_database(&self) -> Result<(), QueryError> {
+        let result = self
+            .session
+            .query("DROP KEYSPACE rusted_invidious", &[])
+            .await;
         match result {
             Ok(_) => tracing::event!(target:"db", Level::DEBUG, "Successfully created keyspace"),
             Err(err) => return Err(err),
@@ -182,35 +239,54 @@ impl DbManager {
     }
     /// gets a video from the database fails if there is no result
     pub async fn get_video(&self, video_id: String) -> Result<Video, DbError> {
-        let res = match self.session.execute(&self.prepared_statements.get(0).unwrap(), (video_id,)).await{
+        let res = match self
+            .session
+            .execute(&self.prepared_statements.get(0).unwrap(), (video_id,))
+            .await
+        {
             Ok(res) => res,
             Err(err) => return Err(DbError::QueryError(err)),
         };
         let video: Video = match res.first_row() {
-            Ok(row) => match row.into_typed::<Video>(){
-                Ok(video) =>video,
+            Ok(row) => match row.into_typed::<Video>() {
+                Ok(video) => video,
                 Err(err) => return Err(DbError::FromRowError(err)),
             },
             Err(err) => return Err(DbError::FirstRowError(err)),
         };
         Ok(video)
     }
-    pub async fn insert_video(&self, video: Video) -> bool{
-        match self.session.execute(&self.prepared_statements.get(6).unwrap(),
-        (video,)).await{
-            Ok(_) =>  true,
-            Err(_) =>  false,
+    pub async fn insert_video(&self, video: Video) -> bool {
+        match self
+            .session
+            .execute(&self.prepared_statements.get(6).unwrap(), (video,))
+            .await
+        {
+            Ok(_) => true,
+            Err(_) => false,
         }
     }
     /// gets a channel video from the database fails if there is no result
-    pub async fn get_channe_video(&self, video_id: String, channel_id: String, updated_at: Timestamp) -> Result<ChannelVideo, DbError> {
-        let res = match self.session.execute(&self.prepared_statements.get(3).unwrap(), (video_id,channel_id, updated_at,)).await{
+    pub async fn get_channe_video(
+        &self,
+        video_id: String,
+        channel_id: String,
+        updated_at: Timestamp,
+    ) -> Result<ChannelVideo, DbError> {
+        let res = match self
+            .session
+            .execute(
+                &self.prepared_statements.get(3).unwrap(),
+                (video_id, channel_id, updated_at),
+            )
+            .await
+        {
             Ok(res) => res,
             Err(err) => return Err(DbError::QueryError(err)),
         };
         let video: ChannelVideo = match res.first_row() {
-            Ok(row) => match row.into_typed::<ChannelVideo>(){
-                Ok(video) =>video,
+            Ok(row) => match row.into_typed::<ChannelVideo>() {
+                Ok(video) => video,
                 Err(err) => return Err(DbError::FromRowError(err)),
             },
             Err(err) => return Err(DbError::FirstRowError(err)),
@@ -219,13 +295,17 @@ impl DbManager {
     }
     /// gets a video from the database
     pub async fn get_channel(&self, channel_id: String) -> Result<Channel, DbError> {
-        let res = match self.session.execute(&self.prepared_statements.get(4).unwrap(), (channel_id,)).await{
+        let res = match self
+            .session
+            .execute(&self.prepared_statements.get(4).unwrap(), (channel_id,))
+            .await
+        {
             Ok(res) => res,
             Err(err) => return Err(DbError::QueryError(err)),
         };
         let channel: Channel = match res.first_row() {
-            Ok(row) => match row.into_typed::<Channel>(){
-                Ok(channel) =>channel,
+            Ok(row) => match row.into_typed::<Channel>() {
+                Ok(channel) => channel,
                 Err(err) => return Err(DbError::FromRowError(err)),
             },
             Err(err) => return Err(DbError::FirstRowError(err)),
@@ -239,14 +319,17 @@ impl DbManager {
             Err(err) => return Err(err),
         };
 
-
-        let res = match self.session.execute(&self.prepared_statements.get(1).unwrap(), (uid,username,)).await{
+        let res = match self
+            .session
+            .execute(&self.prepared_statements.get(1).unwrap(), (uid, username))
+            .await
+        {
             Ok(res) => res,
             Err(err) => return Err(DbError::QueryError(err)),
         };
         let user: DBUser = match res.first_row() {
-            Ok(row) => match row.into_typed::<DBUser>(){
-                Ok(user) =>user,
+            Ok(row) => match row.into_typed::<DBUser>() {
+                Ok(user) => user,
                 Err(err) => return Err(DbError::FromRowError(err)),
             },
             Err(err) => return Err(DbError::FirstRowError(err)),
@@ -254,14 +337,18 @@ impl DbManager {
         Ok(user)
     }
 
-    async fn get_user_uid(&self, username: &String) ->  Result<UsernameUuid, DbError> {
-        let res = match self.session.execute(&self.prepared_statements.get(2).unwrap(), (username,)).await{
+    async fn get_user_uid(&self, username: &String) -> Result<UsernameUuid, DbError> {
+        let res = match self
+            .session
+            .execute(&self.prepared_statements.get(2).unwrap(), (username,))
+            .await
+        {
             Ok(res) => res,
             Err(err) => return Err(DbError::QueryError(err)),
         };
         let uid: UsernameUuid = match res.first_row() {
-            Ok(row) => match row.into_typed::<UsernameUuid>(){
-                Ok(user) =>user,
+            Ok(row) => match row.into_typed::<UsernameUuid>() {
+                Ok(user) => user,
                 Err(err) => return Err(DbError::FromRowError(err)),
             },
             Err(err) => return Err(DbError::FirstRowError(err)),
@@ -269,25 +356,38 @@ impl DbManager {
         Ok(uid)
     }
     /// Add watched video to the database
-    pub async fn add_watched(&self, video_id: String,username: &String) -> Result<bool, DbError> {
+    pub async fn add_watched(&self, video_id: String, username: &String) -> Result<bool, DbError> {
         let uid = match self.get_user_uid(username).await {
             Ok(value) => value,
             Err(value) => return Err(value),
         };
-        match self.session.execute(&self.prepared_statements.get(13).unwrap(),
-        (uid,video_id,)).await{
+        match self
+            .session
+            .execute(&self.prepared_statements.get(13).unwrap(), (uid, video_id))
+            .await
+        {
             Ok(_) => return Ok(true),
             Err(err) => return Err(DbError::QueryError(err)),
         }
     }
     /// Add subscription to the database
-    pub async fn add_subscription(&self, channel_id: String, username: String) -> Result<bool, DbError> {
+    pub async fn add_subscription(
+        &self,
+        channel_id: String,
+        username: String,
+    ) -> Result<bool, DbError> {
         let uid = match self.get_user_uid(&username).await {
             Ok(value) => value,
             Err(value) => return Err(value),
         };
-        match self.session.execute(&self.prepared_statements.get(12).unwrap(),
-        (uid,channel_id,)).await{
+        match self
+            .session
+            .execute(
+                &self.prepared_statements.get(12).unwrap(),
+                (uid, channel_id),
+            )
+            .await
+        {
             Ok(_) => return Ok(true),
             Err(err) => return Err(DbError::QueryError(err)),
         }
@@ -297,7 +397,7 @@ impl DbManager {
     pub async fn get_users(&self, users: &mut Vec<String>) -> Option<DbError> {
         let res = match self
             .session
-            .execute(&self.prepared_statements.get(0).unwrap(), &[])
+            .execute(&self.prepared_statements.get(14).unwrap(), &[])
             .await
         {
             Ok(res) => res,
@@ -310,5 +410,41 @@ impl DbManager {
             });
         }
         None
+    }
+    /// Gets the subscriptions for all users in the database
+    pub async fn get_subs(
+        &self,
+        users: &mut Vec<String>,
+    ) -> Result<HashMap<String, Vec<String>>, DbError> {
+        let mut map: HashMap<String, Vec<String>> = HashMap::new();
+        let mut subvec: Vec<UserSubscribed> = Vec::new();
+        let res = match self
+            .session
+            .execute(&self.prepared_statements.get(2).unwrap(), &[])
+            .await
+        {
+            Ok(res) => res,
+            Err(err) => return Err(DbError::QueryError(err)),
+        };
+        for row in res.rows().unwrap().into_iter() {
+            let sub = match row.into_typed::<UserSubscribed>() {
+                Ok(sub) => sub,
+                Err(err) => return Err(DbError::FromRowError(err)),
+            };
+            subvec.push(sub);
+        }
+        subvec.iter().for_each(|sub| {
+            if !map.contains_key(&sub.channel_id) {
+                map.insert(
+                    sub.channel_id.to_owned(),
+                    subvec
+                        .iter()
+                        .filter(|inner_sub| *inner_sub.channel_id == sub.channel_id)
+                        .map(|inner_sub| inner_sub.uid.to_owned())
+                        .collect(),
+                );
+            }
+        });
+        Ok(map)
     }
 }
