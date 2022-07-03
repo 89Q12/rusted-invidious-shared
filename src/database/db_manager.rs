@@ -292,4 +292,23 @@ impl DbManager {
             Err(err) => return Err(DbError::QueryError(err)),
         }
     }
+
+    /// gets all users from the database
+    pub async fn get_users(&self, users: &mut Vec<String>) -> Option<DbError> {
+        let res = match self
+            .session
+            .execute(&self.prepared_statements.get(0).unwrap(), &[])
+            .await
+        {
+            Ok(res) => res,
+            Err(err) => return Some(DbError::QueryError(err)),
+        };
+        for row in res.rows().unwrap().into_iter() {
+            users.push(match row.into_typed::<DBUser>() {
+                Ok(user) => user.uuid,
+                Err(err) => return Some(DbError::FromRowError(err)),
+            });
+        }
+        None
+    }
 }
