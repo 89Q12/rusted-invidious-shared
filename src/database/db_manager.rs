@@ -63,9 +63,10 @@ impl DbManager {
         let insert_session = self.session.prepare("INSERT INTO sessions (uid, session_id, issued) VALUES(?,?,?)");
         let insert_subscription = self.session.prepare("INSERT INTO user_subscriptions (uid, channel_id) VALUES(?,?)");
         let insert_watched = self.session.prepare("INSERT INTO user_watched (uid, video_id) VALUES(?,?)");
-
+        let get_users = self.session.prepare("SELECT * FROM users");
+        let get_subs = self.session.prepare("SELECT channel_id FROM user_subscriptions");
         let results = tokio::join!(get_video, get_user, get_user_uid, get_channel_video, get_channel,get_session, 
-            insert_video,insert_user,insert_user_uid, insert_channel_video, insert_channel, insert_session, insert_subscription, insert_watched);
+            insert_video,insert_user,insert_user_uid, insert_channel_video, insert_channel, insert_session, insert_subscription, insert_watched, get_users,get_subs);
 
         self.prepared_statements.push(results.0.unwrap());
         self.prepared_statements.push(results.1.unwrap());
@@ -81,6 +82,8 @@ impl DbManager {
         self.prepared_statements.push(results.11.unwrap());
         self.prepared_statements.push(results.12.unwrap());
         self.prepared_statements.push(results.13.unwrap());
+        self.prepared_statements.push(results.14.unwrap());
+        self.prepared_statements.push(results.15.unwrap());
 
     }
     /// Checks if the database exists if not it creates a new keyspace and creates all tables.
