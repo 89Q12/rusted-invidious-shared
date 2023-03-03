@@ -98,7 +98,7 @@ impl DbManager {
             .prepare("INSERT INTO sessions (uid, session_id, issued) VALUES(?,?,?)");
         let insert_subscription = self
             .session
-            .prepare("INSERT INTO user_subscriptions (uid, channel_id) VALUES(?,?)");
+            .prepare("INSERT INTO user_subscriptions (uid, channel_id, subuuid) VALUES(?,?,?)");
         let insert_watched = self
             .session
             .prepare("INSERT INTO user_watched (uid, video_id) VALUES(?,?)");
